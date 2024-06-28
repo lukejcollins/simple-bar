@@ -5,14 +5,71 @@ import * as Utils from "../../utils";
 import ColorPicker from "./color-picker.jsx";
 import IconPicker from "./icon-picker.jsx";
 
-const UserWidgetCreator = ({
+const { React } = Uebersicht;
+
+export default function UserWidgetsCreator({ defaultValue, onChange }) {
+  const [widgets, setWidgets] = React.useState(defaultValue || {});
+  const keys = Object.keys(widgets);
+
+  const highestId = keys.reduce((acc, key) => {
+    const keyAsNumber = parseInt(key, 10);
+    return keyAsNumber > acc ? keyAsNumber : acc;
+  }, 1);
+  const newId = highestId + 1;
+
+  const onClick = () =>
+    setWidgets((widgets) => ({
+      ...widgets,
+      [newId]: { ...Settings.userWidgetDefault },
+    }));
+  const onWidgetChange = (index, field, value) => {
+    const newWidgets = { ...widgets };
+    const newKeys = Object.keys(newWidgets);
+    const updatedWidgets = newKeys.reduce((acc, key, i) => {
+      const widget = newWidgets[key];
+      return {
+        ...acc,
+        [i + 1]: key === index ? { ...widget, [field]: value } : widget,
+      };
+    }, {});
+    setWidgets(updatedWidgets);
+  };
+
+  React.useEffect(() => {
+    const diffs = Utils.compareObjects(defaultValue, widgets);
+    const hasDiffs = Object.keys(diffs).length > 0;
+    if (hasDiffs) onChange({ target: { value: widgets } });
+  }, [defaultValue, onChange, widgets]);
+
+  return (
+    <div className="user-widgets-creator">
+      {keys.map((key, i) => (
+        <UserWidgetCreator
+          key={`${key}-${widgets[key].backgroundColor}`}
+          index={key}
+          onWidgetChange={onWidgetChange}
+          setWidgets={setWidgets}
+          widget={widgets[key]}
+          isFirst={i === 0}
+          isLast={i === keys.length - 1}
+        />
+      ))}
+      <button className="user-widgets-creator__add" onClick={onClick}>
+        <Icons.Add />
+        Add a custom widget
+      </button>
+    </div>
+  );
+}
+
+function UserWidgetCreator({
   index,
   isFirst,
   isLast,
   onWidgetChange,
   setWidgets,
   widget,
-}) => {
+}) {
   const {
     title,
     icon,
@@ -24,9 +81,10 @@ const UserWidgetCreator = ({
     refreshFrequency,
     active = true,
     noIcon = false,
+    showOnDisplay = "",
   } = widget;
 
-  const indexAsNumber = parseInt(index);
+  const indexAsNumber = parseInt(index, 10);
 
   const onRemoveClick = () => {
     setWidgets((widgets) => {
@@ -92,6 +150,9 @@ const UserWidgetCreator = ({
       <button className="user-widget-creator__remove" onClick={onRemoveClick}>
         <Icons.Remove />
       </button>
+      <div className="user-widget-creator__index">
+        n°<b>{index}</b>
+      </div>
       <IconPicker callback={onWidgetChange} index={index} selectedIcon={icon} />
       <div className="user-widget-creator__right">
         <div className="user-widget-creator__right-top">
@@ -115,6 +176,18 @@ const UserWidgetCreator = ({
             id={`refresh-frequency-${index}`}
             type="text"
             defaultValue={refreshFrequency}
+          />
+        </div>
+        <div className="user-widget-creator__input-group">
+          <label htmlFor={`show-on-display-${index}`}>Show on display: </label>
+          <input
+            className="user-widget-creator__show-on-display"
+            onChange={onChange("showOnDisplay")}
+            id={`show-on-display-${index}`}
+            type="text"
+            defaultValue={showOnDisplay}
+            placeholder="example: 1,2 (leave blank to show on all displays)"
+            spellCheck={false}
           />
         </div>
         <div className="user-widget-creator__input-group">
@@ -186,61 +259,4 @@ const UserWidgetCreator = ({
       </div>
     </div>
   );
-};
-
-const UserWidgetsCreator = ({ defaultValue, onChange }) => {
-  const [widgets, setWidgets] = Uebersicht.React.useState(defaultValue || {});
-  const keys = Object.keys(widgets);
-
-  const highestId = keys.reduce((acc, key) => {
-    const keyAsNumber = parseInt(key);
-    return keyAsNumber > acc ? keyAsNumber : acc;
-  }, 1);
-  const newId = highestId + 1;
-
-  const onClick = () =>
-    setWidgets((widgets) => ({
-      ...widgets,
-      [newId]: { ...Settings.userWidgetDefault },
-    }));
-  const onWidgetChange = (index, field, value) => {
-    const newWidgets = { ...widgets };
-    const newKeys = Object.keys(newWidgets);
-    const updatedWidgets = newKeys.reduce((acc, key, i) => {
-      const widget = newWidgets[key];
-      return {
-        ...acc,
-        [i + 1]: key === index ? { ...widget, [field]: value } : widget,
-      };
-    }, {});
-    setWidgets(updatedWidgets);
-  };
-
-  Uebersicht.React.useEffect(() => {
-    const diffs = Utils.compareObjects(defaultValue, widgets);
-    const hasDiffs = Object.keys(diffs).length > 0;
-    if (hasDiffs) onChange({ target: { value: widgets } });
-  }, [widgets]);
-
-  return (
-    <div className="user-widgets-creator">
-      {keys.map((key, i) => (
-        <UserWidgetCreator
-          key={`${key}-${widgets[key].backgroundColor}`}
-          index={key}
-          onWidgetChange={onWidgetChange}
-          setWidgets={setWidgets}
-          widget={widgets[key]}
-          isFirst={i === 0}
-          isLast={i === keys.length - 1}
-        />
-      ))}
-      <button className="user-widgets-creator__add" onClick={onClick}>
-        <Icons.Add />
-        Add a custom widget
-      </button>
-    </div>
-  );
-};
-
-export default UserWidgetsCreator;
+}

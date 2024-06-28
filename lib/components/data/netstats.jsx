@@ -1,25 +1,148 @@
 import * as Uebersicht from "uebersicht";
 import * as DataWidget from "./data-widget.jsx";
 import * as DataWidgetLoader from "./data-widget-loader.jsx";
+import Graph from "./graph.jsx";
 import useWidgetRefresh from "../../hooks/use-widget-refresh.js";
+import useServerSocket from "../../hooks/use-server-socket";
+import { useSimpleBarContext } from "../simple-bar-context.jsx";
 import * as Icons from "../icons.jsx";
 import * as Utils from "../../utils.js";
-import * as Settings from "../../settings.js";
 
 export { netstatsStyles as styles } from "../../styles/components/data/netstats";
 
-const settings = Settings.get();
-const { widgets, netstatsWidgetOptions } = settings;
-const { netstatsWidget } = widgets;
-const { refreshFrequency } = netstatsWidgetOptions;
+const { React } = Uebersicht;
 
 const DEFAULT_REFRESH_FREQUENCY = 2000;
-const REFRESH_FREQUENCY = Settings.getRefreshFrequency(
-  refreshFrequency,
-  DEFAULT_REFRESH_FREQUENCY
-);
+const GRAPH_LENGTH = 30;
 
-const formatBytes = (bytes, decimals = 1) => {
+export const Widget = React.memo(() => {
+  const { displayIndex, settings } = useSimpleBarContext();
+  const { widgets, netstatsWidgetOptions } = settings;
+  const { netstatsWidget } = widgets;
+  const { refreshFrequency, showOnDisplay, displayAsGraph } =
+    netstatsWidgetOptions;
+
+  const isDisabled = React.useRef(false);
+
+  const refresh = React.useMemo(
+    () =>
+      Utils.getRefreshFrequency(refreshFrequency, DEFAULT_REFRESH_FREQUENCY),
+    [refreshFrequency]
+  );
+
+  const visible =
+    Utils.isVisibleOnDisplay(displayIndex, showOnDisplay) && netstatsWidget;
+
+  const [graph, setGraph] = React.useState([]);
+  const [state, setState] = React.useState();
+  const [loading, setLoading] = React.useState(visible);
+
+  const resetWidget = () => {
+    setState(undefined);
+    setLoading(false);
+    setGraph([]);
+  };
+
+  const getNetstats = React.useCallback(async () => {
+    if (!visible) return;
+    try {
+      const output = await Uebersicht.run(
+        `bash ./simple-bar/lib/scripts/netstats.sh 2>&1`
+      );
+      if (!visible || isDisabled.current) {
+        return;
+      }
+      const data = Utils.cleanupOutput(output);
+      const json = JSON.parse(data);
+      setState(json);
+      if (displayAsGraph) {
+        Utils.addToGraphHistory(json, setGraph, GRAPH_LENGTH);
+      }
+      setLoading(false);
+    } catch (e) {
+      setTimeout(getNetstats, 1000);
+    }
+  }, [displayAsGraph, setGraph, visible]);
+
+  React.useEffect(() => {
+    isDisabled.current = !visible;
+  }, [visible]);
+
+  useServerSocket("netstats", visible, getNetstats, resetWidget);
+  useWidgetRefresh(visible, getNetstats, refresh);
+
+  if (loading)
+    return (
+      <React.Fragment>
+        <DataWidgetLoader.Widget className="netstats" />
+        {!displayAsGraph && <DataWidgetLoader.Widget className="netstats" />}
+      </React.Fragment>
+    );
+
+  if (!state) {
+    return null;
+  }
+
+  const { download, upload } = state;
+
+  if (download === undefined || upload === undefined) {
+    return null;
+  }
+
+  const formatedDownload = formatBytes(download);
+  const formatedUpload = formatBytes(upload);
+
+  if (displayAsGraph) {
+    return (
+      <DataWidget.Widget classes="netstats netstats--graph" disableSlider>
+        <Graph
+          className="netstats__graph"
+          caption={{
+            download: {
+              value: formatedDownload,
+              icon: Icons.Download,
+              color: "var(--magenta)",
+            },
+            upload: {
+              value: formatedUpload,
+              icon: Icons.Upload,
+              color: "var(--blue)",
+            },
+          }}
+          values={graph}
+          maxLength={GRAPH_LENGTH}
+        />
+      </DataWidget.Widget>
+    );
+  }
+
+  return (
+    <React.Fragment>
+      <DataWidget.Widget classes="netstats" disableSlider>
+        <div className="netstats__item">
+          <Icons.Download className="netstats__icon netstats__icon--download" />
+          <span
+            className="netstats__value"
+            dangerouslySetInnerHTML={{ __html: formatedDownload }}
+          />
+        </div>
+      </DataWidget.Widget>
+      <DataWidget.Widget classes="netstats" disableSlider>
+        <div className="netstats__item">
+          <Icons.Upload className="netstats__icon netstats__icon--upload" />
+          <span
+            className="netstats__value"
+            dangerouslySetInnerHTML={{ __html: formatedUpload }}
+          />
+        </div>
+      </DataWidget.Widget>
+    </React.Fragment>
+  );
+});
+
+Widget.displayName = "Netstats";
+
+function formatBytes(bytes, decimals = 1) {
   if (!+bytes) return "0b";
 
   const k = 1024;
@@ -31,62 +154,4 @@ const formatBytes = (bytes, decimals = 1) => {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))}<em>${
     sizes[i]
   }</em>`;
-};
-
-export const Widget = () => {
-  const [state, setState] = Uebersicht.React.useState();
-  const [loading, setLoading] = Uebersicht.React.useState(netstatsWidget);
-
-  const getNetstats = async () => {
-    try {
-      const output = await Uebersicht.run(
-        `bash ./simple-bar/lib/scripts/netstats.sh 2>&1`
-      );
-      const data = Utils.cleanupOutput(output);
-      const json = JSON.parse(data);
-      setState(json);
-      setLoading(false);
-    } catch (e) {
-      setTimeout(getNetstats, 1000);
-    }
-  };
-
-  useWidgetRefresh(netstatsWidget, getNetstats, REFRESH_FREQUENCY);
-
-  if (loading) return <DataWidgetLoader.Widget className="netstats" />;
-  if (!state) return null;
-  const { download, upload } = state;
-
-  if (download === undefined || upload === undefined) return null;
-
-  return (
-    <Uebersicht.React.Fragment>
-      <DataWidget.Widget
-        classes="netstats"
-        tooltip="Network stats"
-        disableSlider
-      >
-        <div className="netstats__item netstats__item--download">
-          <Icons.Download className="netstats__icon" />
-          <span
-            className="netstats__value"
-            dangerouslySetInnerHTML={{ __html: formatBytes(download) }}
-          />
-        </div>
-      </DataWidget.Widget>
-      <DataWidget.Widget
-        classes="netstats"
-        tooltip="Network stats"
-        disableSlider
-      >
-        <div className="netstats__item netstats__item--upload">
-          <Icons.Upload className="netstats__icon" />
-          <span
-            className="netstats__value"
-            dangerouslySetInnerHTML={{ __html: formatBytes(upload) }}
-          />
-        </div>
-      </DataWidget.Widget>
-    </Uebersicht.React.Fragment>
-  );
-};
+}
